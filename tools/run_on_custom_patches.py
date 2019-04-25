@@ -144,7 +144,7 @@ def main():
 
     # model = model.to('cuda:5').eval()
     #
-    img = mmcv.imread('test_images/body3.jpg')
+    img = mmcv.imread('test_images/body4.jpg')
 
     im_height = img.shape[0]
     im_width = img.shape[1]
@@ -168,23 +168,24 @@ def main():
 
     output = inference_detector(model, img, cfg_mmcv)
     batch_heatmaps = output.clone().cpu().numpy()
-    print(batch_heatmaps.shape)
-
-    print(im_height, im_width)
 
     hm_height = batch_heatmaps.shape[2]
     hm_width = batch_heatmaps.shape[3]
 
     preds = get_max_preds(batch_heatmaps)
-    print(preds, preds[0].shape)
+
+    print(preds, preds[1])
 
     # Draw points
     #print(img.shape)
     # img = img[0].permute(1, 2, 0).cpu().numpy()
 
-    for kp in preds[0][0]:
+    for idx, kp in enumerate(preds[0][0]):
         coords = (int(kp[0]*im_height/hm_height), int(kp[1]*im_width/hm_width))
-        cv2.circle(img, coords, 2, (0, 255, 0), -1)
+        cv2.circle(img, coords, 4, (0, 255, 0), -1)
+        cv2.putText(img, str(preds[1][0][idx][0])[:5], (coords[0]+5, coords[1]), cv2.FONT_HERSHEY_PLAIN, 0.8, (0, 255, 255),
+                    1, cv2.LINE_AA)
+
 
     cv2.namedWindow('image', cv2.WINDOW_NORMAL)
     cv2.imshow('image', img)

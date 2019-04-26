@@ -63,7 +63,7 @@ def get_final_preds(config, batch_heatmaps, center, scale):
                     diff = np.array(
                         [
                             hm[py][px+1] - hm[py][px-1],
-                            hm[py+1][px]-hm[py-1][px]
+                            hm[py+1][px] - hm[py-1][px]
                         ]
                     )
                     coords[n][p] += np.sign(diff) * .25

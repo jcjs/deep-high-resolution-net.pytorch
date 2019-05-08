@@ -114,44 +114,42 @@ def main():
 
     # model = model.to('cuda:5').eval()
     #
-    img = mmcv.imread('test_images/body4.jpg')
+    img = mmcv.imread('test_images/body2.jpg')
 
     im_height, im_width = img.shape[0], img.shape[1]
     wh_ratio = im_width / im_height
     hw_ratio = im_height / im_width
-    model_img_width = 384
-    model_img_height = 288
-
-    new_size = (model_img_width, int(model_img_width / wh_ratio))
+    model_img_width, model_img_height = 384, 288
+    model_size = (model_img_width, int(model_img_width / wh_ratio))
 
     # img = cv2.resize(img, (int(model_img_height / hw_ratio), model_img_height),
     #                  interpolation=cv2.INTER_CUBIC if im_height < model_img_height else cv2.INTER_AREA)
 
-    img = cv2.resize(img, new_size,
-                     interpolation=cv2.INTER_CUBIC if im_width < model_img_width else cv2.INTER_AREA)
+    # Resize width to model_img_width, keeping aspect ratio
 
-    im_height, im_width = img.shape[0], img.shape[1]
+    # Resize width to model_img_width, keeping aspect ratio
+    cfg_mmcv.data.test.img_scale = model_size
 
     output = inference_detector(model, img, cfg_mmcv)
     batch_heatmaps = output.clone().cpu().numpy()
 
-    hm_height = batch_heatmaps.shape[2]
-    hm_width = batch_heatmaps.shape[3]
+    hm_width, hm_height = batch_heatmaps.shape[3], batch_heatmaps.shape[2]
 
     # Assumption: input image is already a BBOX: [top left x position, top left y position, width, height]
-    bbox = (0, 0, im_width, im_height)
     coords, scores = inference.get_max_preds(batch_heatmaps)
+    bbox = (0, 0, im_width, im_height)
     # coords, scores = inference.get_final_preds(batch_heatmaps, bbox)
 
-    # img = img[0].permute(1, 2, 0).cpu().numpy()
+    img = cv2.resize(img, model_size, interpolation=cv2.INTER_LANCZOS4)
+    im_height, im_width = img.shape[0], img.shape[1]
 
     print(scores)
-    # Draw points
+    # Visualization
     for idx, kp in enumerate(coords[0]):
-        new_coords = (int(kp[0]*im_height/hm_height), int(kp[1]*im_width/hm_width))
-        print(idx, kp, new_coords)
-        cv2.circle(img, new_coords, 4, (0, 255, 0), -1)
-        cv2.putText(img, str(idx) + ': ' + str(scores[0][idx][0])[:5], (new_coords[0]+5, new_coords[1]),
+        tf_coords = (int(kp[0]*im_height/hm_height), int(kp[1]*im_width/hm_width))
+        print(idx, kp, tf_coords)
+        cv2.circle(img, tf_coords, 4, (0, 255, 0), -1)
+        cv2.putText(img, str(idx) + ': ' + str(scores[0][idx][0])[:5], (tf_coords[0]+5, tf_coords[1]),
                     cv2.FONT_HERSHEY_PLAIN, 0.8, (0, 255, 255), 1, cv2.LINE_AA)
 
     cv2.namedWindow('image', cv2.WINDOW_NORMAL)

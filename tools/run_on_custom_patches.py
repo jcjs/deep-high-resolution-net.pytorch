@@ -34,9 +34,14 @@ import mmcv
 from mmdet.apis import inference_detector
 from mmdet.datasets import to_tensor
 
-
 import numpy as np
 
+# "keypoints": [
+#             "nose","left_eye","right_eye","left_ear","right_ear",
+#             "left_shoulder","right_shoulder","left_elbow","right_elbow",
+#             "left_wrist","right_wrist","left_hip","right_hip",
+#             "left_knee","right_knee","left_ankle","right_ankle"
+#         ],
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train keypoints network')
@@ -44,13 +49,12 @@ def parse_args():
     parser.add_argument('--cfg',
                         help='experiment configure file name',
                         required=False,
-                        type=str)
-
+                        type=str,
+                        default='../experiments/coco/hrnet/w48_384x288_adam_lr1e-3.yaml')
     parser.add_argument('opts',
                         help="Modify config options using the command-line",
                         default=None,
                         nargs=argparse.REMAINDER)
-
     parser.add_argument('--modelDir',
                         help='model directory',
                         type=str,
@@ -67,7 +71,6 @@ def parse_args():
                         help='prev Model directory',
                         type=str,
                         default='')
-
     args = parser.parse_args()
     return args
 
@@ -75,6 +78,8 @@ def parse_args():
 def main():
     args = parse_args()
     args.cfg = '../experiments/coco/hrnet/w48_384x288_adam_lr1e-3.yaml'
+    # args.cfg = '../experiments/coco/resnet/res152_384x288_d256x3_adam_lr1e-3.yaml'
+    # args.cfg = '../experiments/coco/hrnet/w48_256x192_adam_lr1e-3.yaml'
     update_config(cfg, args)
 
     logger, final_output_dir, tb_log_dir = create_logger(
@@ -102,30 +107,30 @@ def main():
         logger.info('=> loading model from {}'.format(model_state_file))
         model.load_state_dict(torch.load(model_state_file))
 
-    #model = torch.nn.DataParallel(model, device_ids=cfg.GPUS).cuda()
+    # model = torch.nn.DataParallel(model, device_ids=cfg.GPUS).cuda()
 
-    cfg_mmcv = mmcv.Config.fromfile('../lib/config/mmcv_dummy.py')
+    cfg_mmcv = mmcv.Config.fromfile('../lib/config/mmcv_config.py')
     # cfg_mmcv.model.pretrained = None
 
     # model = model.to('cuda:5').eval()
     #
-    img = mmcv.imread('test_images/body1.jpg')
+    img = mmcv.imread('test_images/body4.jpg')
 
-    im_height = img.shape[0]
-    im_width = img.shape[1]
+    im_height, im_width = img.shape[0], img.shape[1]
     wh_ratio = im_width / im_height
     hw_ratio = im_height / im_width
-    model_img_height = 288
     model_img_width = 384
+    model_img_height = 288
+
+    new_size = (model_img_width, int(model_img_width / wh_ratio))
 
     # img = cv2.resize(img, (int(model_img_height / hw_ratio), model_img_height),
     #                  interpolation=cv2.INTER_CUBIC if im_height < model_img_height else cv2.INTER_AREA)
 
-    img = cv2.resize(img, (model_img_width, int(model_img_width / wh_ratio)),
+    img = cv2.resize(img, new_size,
                      interpolation=cv2.INTER_CUBIC if im_width < model_img_width else cv2.INTER_AREA)
 
-    im_height = img.shape[0]
-    im_width = img.shape[1]
+    im_height, im_width = img.shape[0], img.shape[1]
 
     output = inference_detector(model, img, cfg_mmcv)
     batch_heatmaps = output.clone().cpu().numpy()
@@ -133,17 +138,21 @@ def main():
     hm_height = batch_heatmaps.shape[2]
     hm_width = batch_heatmaps.shape[3]
 
+    # Assumption: input image is already a BBOX: [top left x position, top left y position, width, height]
+    bbox = (0, 0, im_width, im_height)
     coords, scores = inference.get_max_preds(batch_heatmaps)
+    # coords, scores = inference.get_final_preds(batch_heatmaps, bbox)
 
     # img = img[0].permute(1, 2, 0).cpu().numpy()
 
+    print(scores)
     # Draw points
     for idx, kp in enumerate(coords[0]):
         new_coords = (int(kp[0]*im_height/hm_height), int(kp[1]*im_width/hm_width))
+        print(idx, kp, new_coords)
         cv2.circle(img, new_coords, 4, (0, 255, 0), -1)
-        cv2.putText(img, str(scores[0][idx][0])[:5], (new_coords[0]+5, new_coords[1]), cv2.FONT_HERSHEY_PLAIN, 0.8, (0, 255, 255),
-                    1, cv2.LINE_AA)
-
+        cv2.putText(img, str(idx) + ': ' + str(scores[0][idx][0])[:5], (new_coords[0]+5, new_coords[1]),
+                    cv2.FONT_HERSHEY_PLAIN, 0.8, (0, 255, 255), 1, cv2.LINE_AA)
 
     cv2.namedWindow('image', cv2.WINDOW_NORMAL)
     cv2.imshow('image', img)

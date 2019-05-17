@@ -76,56 +76,32 @@ def parse_args():
 
 
 def main():
+    # Params
+    checkpoint = '../lib/models/pytorch/pose_coco/pose_hrnet_w48_384x288.pth'
+    # checkpoint = '../lib/models/pytorch/pose_coco/pose_hrnet_w32_384x288.pth'
+    input_img = 'test_images/body7.jpg'
+
+
     args = parse_args()
     args.cfg = '../experiments/coco/hrnet/w48_384x288_adam_lr1e-3.yaml'
-    # args.cfg = '../experiments/coco/resnet/res152_384x288_d256x3_adam_lr1e-3.yaml'
     # args.cfg = '../experiments/coco/hrnet/w48_256x192_adam_lr1e-3.yaml'
     update_config(cfg, args)
 
-    logger, final_output_dir, tb_log_dir = create_logger(
-        cfg, args.cfg, 'valid')
-
-    logger.info(pprint.pformat(args))
-    logger.info(cfg)
-
-    # cudnn related setting
     cudnn.benchmark = cfg.CUDNN.BENCHMARK
     torch.backends.cudnn.deterministic = cfg.CUDNN.DETERMINISTIC
     torch.backends.cudnn.enabled = cfg.CUDNN.ENABLED
 
-    model = eval('models.'+cfg.MODEL.NAME+'.get_pose_net')(
-        cfg, is_train=False
-    )
-
-    if cfg.TEST.MODEL_FILE:
-        logger.info('=> loading model from {}'.format(cfg.TEST.MODEL_FILE))
-        model.load_state_dict(torch.load(cfg.TEST.MODEL_FILE), strict=False)
-    else:
-        model_state_file = os.path.join(
-            final_output_dir, 'final_state.pth'
-        )
-        logger.info('=> loading model from {}'.format(model_state_file))
-        model.load_state_dict(torch.load(model_state_file))
-
-    # model = torch.nn.DataParallel(model, device_ids=cfg.GPUS).cuda()
+    model = eval('models.'+cfg.MODEL.NAME+'.get_pose_net')(cfg, is_train=False)
+    model.load_state_dict(torch.load(checkpoint), strict=False)
 
     cfg_mmcv = mmcv.Config.fromfile('../lib/config/mmcv_config.py')
-    # cfg_mmcv.model.pretrained = None
 
-    # model = model.to('cuda:5').eval()
-    #
-    img = mmcv.imread('test_images/body2.jpg')
-
+    img = mmcv.imread(input_img)
     im_height, im_width = img.shape[0], img.shape[1]
     wh_ratio = im_width / im_height
     hw_ratio = im_height / im_width
     model_img_width, model_img_height = 384, 288
     model_size = (model_img_width, int(model_img_width / wh_ratio))
-
-    # img = cv2.resize(img, (int(model_img_height / hw_ratio), model_img_height),
-    #                  interpolation=cv2.INTER_CUBIC if im_height < model_img_height else cv2.INTER_AREA)
-
-    # Resize width to model_img_width, keeping aspect ratio
 
     # Resize width to model_img_width, keeping aspect ratio
     cfg_mmcv.data.test.img_scale = model_size
@@ -135,16 +111,13 @@ def main():
 
     hm_width, hm_height = batch_heatmaps.shape[3], batch_heatmaps.shape[2]
 
-    # Assumption: input image is already a BBOX: [top left x position, top left y position, width, height]
     coords, scores = inference.get_max_preds(batch_heatmaps)
-    bbox = (0, 0, im_width, im_height)
-    # coords, scores = inference.get_final_preds(batch_heatmaps, bbox)
 
     img = cv2.resize(img, model_size, interpolation=cv2.INTER_LANCZOS4)
     im_height, im_width = img.shape[0], img.shape[1]
 
+    # Debug visualization
     print(scores)
-    # Visualization
     for idx, kp in enumerate(coords[0]):
         tf_coords = (int(kp[0]*im_height/hm_height), int(kp[1]*im_width/hm_width))
         print(idx, kp, tf_coords)
@@ -156,6 +129,7 @@ def main():
     cv2.imshow('image', img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
+    ##
 
 
 if __name__ == '__main__':

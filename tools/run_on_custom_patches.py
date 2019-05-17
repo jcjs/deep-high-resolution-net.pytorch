@@ -43,64 +43,36 @@ import numpy as np
 #             "left_knee","right_knee","left_ankle","right_ankle"
 #         ],
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='Train keypoints network')
-    # general
-    parser.add_argument('--cfg',
-                        help='experiment configure file name',
-                        required=False,
-                        type=str,
-                        default='../experiments/coco/hrnet/w48_384x288_adam_lr1e-3.yaml')
-    parser.add_argument('opts',
-                        help="Modify config options using the command-line",
-                        default=None,
-                        nargs=argparse.REMAINDER)
-    parser.add_argument('--modelDir',
-                        help='model directory',
-                        type=str,
-                        default='')
-    parser.add_argument('--logDir',
-                        help='log directory',
-                        type=str,
-                        default='')
-    parser.add_argument('--dataDir',
-                        help='data directory',
-                        type=str,
-                        default='')
-    parser.add_argument('--prevModelDir',
-                        help='prev Model directory',
-                        type=str,
-                        default='')
-    args = parser.parse_args()
-    return args
-
 
 def main():
     # Params
+    config_file = '../experiments/coco/hrnet/w48_384x288_adam_lr1e-3.yaml'
     checkpoint = '../lib/models/pytorch/pose_coco/pose_hrnet_w48_384x288.pth'
     # checkpoint = '../lib/models/pytorch/pose_coco/pose_hrnet_w32_384x288.pth'
-    input_img = 'test_images/body7.jpg'
+    input_img_path = 'test_images/body6.jpg'
 
-
-    args = parse_args()
-    args.cfg = '../experiments/coco/hrnet/w48_384x288_adam_lr1e-3.yaml'
-    # args.cfg = '../experiments/coco/hrnet/w48_256x192_adam_lr1e-3.yaml'
+    # Simplifying bullshit arg parsing (not touching get_pose_net() method)
+    args = argparse.ArgumentParser().parse_args()
+    args.cfg, args.opts, args.modelDir, args.logDir, args.dataDir = config_file, [], None, None, None
     update_config(cfg, args)
+    ##
 
-    cudnn.benchmark = cfg.CUDNN.BENCHMARK
-    torch.backends.cudnn.deterministic = cfg.CUDNN.DETERMINISTIC
-    torch.backends.cudnn.enabled = cfg.CUDNN.ENABLED
-
-    model = eval('models.'+cfg.MODEL.NAME+'.get_pose_net')(cfg, is_train=False)
+    model = models.pose_hrnet.get_pose_net(cfg, is_train=False)
     model.load_state_dict(torch.load(checkpoint), strict=False)
 
     cfg_mmcv = mmcv.Config.fromfile('../lib/config/mmcv_config.py')
 
-    img = mmcv.imread(input_img)
-    im_height, im_width = img.shape[0], img.shape[1]
+    img = mmcv.imread(input_img_path)
+
+    model_img_width = cfg.MODEL.IMAGE_SIZE[1]
+    model_img_height = cfg.MODEL.IMAGE_SIZE[0]
+
+    im_width = img.shape[1]
+    im_height = img.shape[0]
+
     wh_ratio = im_width / im_height
     hw_ratio = im_height / im_width
-    model_img_width, model_img_height = 384, 288
+
     model_size = (model_img_width, int(model_img_width / wh_ratio))
 
     # Resize width to model_img_width, keeping aspect ratio

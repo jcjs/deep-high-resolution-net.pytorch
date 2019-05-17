@@ -49,7 +49,7 @@ def main():
     config_file = '../experiments/coco/hrnet/w48_384x288_adam_lr1e-3.yaml'
     checkpoint = '../lib/models/pytorch/pose_coco/pose_hrnet_w48_384x288.pth'
     # checkpoint = '../lib/models/pytorch/pose_coco/pose_hrnet_w32_384x288.pth'
-    input_img_path = 'test_images/body6.jpg'
+    input_img_path = 'test_images/body5.jpg'
 
     # Simplifying bullshit arg parsing (not touching get_pose_net() method)
     args = argparse.ArgumentParser().parse_args()
@@ -80,13 +80,14 @@ def main():
 
     output = inference_detector(model, img, cfg_mmcv)
     batch_heatmaps = output.clone().cpu().numpy()
-
-    hm_width, hm_height = batch_heatmaps.shape[3], batch_heatmaps.shape[2]
-
-    coords, scores = inference.get_max_preds(batch_heatmaps)
+    hm_width = batch_heatmaps.shape[3]
+    hm_height = batch_heatmaps.shape[2]
 
     img = cv2.resize(img, model_size, interpolation=cv2.INTER_LANCZOS4)
-    im_height, im_width = img.shape[0], img.shape[1]
+    im_height = img.shape[0]
+    im_width = img.shape[1]
+
+    coords, scores = inference.get_max_preds(batch_heatmaps)
 
     # Debug visualization
     print(scores)

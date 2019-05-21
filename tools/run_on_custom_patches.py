@@ -46,7 +46,6 @@ import numpy as np
 #         ],
 
 
-
 def read_bboxes(jspath, imgpath, expand=1.5):
     '''
     :param jspath:
@@ -67,7 +66,7 @@ def read_bboxes(jspath, imgpath, expand=1.5):
             lt, rb = r['bbox']['lt'], r['bbox']['rb'] # left top, right bottom corners
             lt = [int(dim*(1-expand/100)) for dim in lt]
             rb = [int(dim*(1+expand/100)) for dim in rb]
-            bbox = img[lt[1]:rb[1], lt[0]:rb[0]]
+            bbox = img[lt[1]:rb[1], lt[0]:rb[0]]  # TODO: this could crash! add image border, with size of <expand>
             bboxes.append(bbox)
             # mmcv.imshow(bbox)
 
@@ -75,7 +74,9 @@ def read_bboxes(jspath, imgpath, expand=1.5):
 
 
 def calc_avg_aspect_ratio(bboxes):
-    pass
+    avg_width = sum(bbox.shape[1] for bbox in bboxes) / len(bboxes)
+    avg_height = sum(bbox.shape[0] for bbox in bboxes) / len(bboxes)
+    return avg_height / avg_width
 
 
 def main():
@@ -104,9 +105,9 @@ def main():
     # input_img_height = input_img.shape[0]
     # wh_ratio = input_img_width / input_img_height
     # model_size = (model_img_width, int(model_img_width / wh_ratio))
-
+    height_scale = calc_avg_aspect_ratio(bboxes)
     cfg_mmcv = mmcv.Config.fromfile('../lib/config/mmcv_config.py')
-    cfg_mmcv.data.test.img_scale = (cfg.MODEL.IMAGE_SIZE[1], int(2.75*cfg.MODEL.IMAGE_SIZE[1]))
+    cfg_mmcv.data.test.img_scale = (cfg.MODEL.IMAGE_SIZE[1], int(height_scale*cfg.MODEL.IMAGE_SIZE[1]))
 
     model = models.pose_hrnet.get_pose_net(cfg, is_train=False)
     model.load_state_dict(torch.load(checkpoint), strict=False)

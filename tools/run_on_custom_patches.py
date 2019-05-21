@@ -105,21 +105,15 @@ def main():
     # input_img_height = input_img.shape[0]
     # wh_ratio = input_img_width / input_img_height
     # model_size = (model_img_width, int(model_img_width / wh_ratio))
+
+    model_input_width = cfg.MODEL.IMAGE_SIZE[1]
     height_scale = calc_avg_aspect_ratio(bboxes)
     cfg_mmcv = mmcv.Config.fromfile('../lib/config/mmcv_config.py')
-    cfg_mmcv.data.test.img_scale = (cfg.MODEL.IMAGE_SIZE[1], int(height_scale*cfg.MODEL.IMAGE_SIZE[1]))
+    cfg_mmcv.data.test.img_scale = (model_input_width, int(height_scale*model_input_width))
+    print(cfg_mmcv.data.test.img_scale)
 
     model = models.pose_hrnet.get_pose_net(cfg, is_train=False)
     model.load_state_dict(torch.load(checkpoint), strict=False)
-
-    # if os.path.isdir(input_path):
-    #     img_fnames = glob.glob('{}/*.jpg'.format(input_path))
-    #     outputs = inference_detector(model, img_fnames, cfg_mmcv)
-    # elif os.path.isfile(input_path):
-    #     img_fnames = [input_path]
-    #     outputs = [inference_detector(model, input_path, cfg_mmcv)]
-    # else:
-    #     raise Exception('Provided image path is not a file or directory.')
 
     if len(bboxes) > 1:
         outputs = inference_detector(model, bboxes, cfg_mmcv)
@@ -127,14 +121,6 @@ def main():
         outputs = [inference_detector(model, bboxes, cfg_mmcv)]
     else:
         raise Exception('There are no bboxes!')
-
-
-    # img_sizes = [mmcv.imread(img).shape for img in img_fnames]
-
-    # Forward pass
-    # output = [inference_detector(model, input_img, cfg_mmcv)]
-    # batch_heatmaps = output.clone().cpu().numpy()
-
 
     for idx, output in enumerate(list(outputs)):
         if isinstance(output, tuple):

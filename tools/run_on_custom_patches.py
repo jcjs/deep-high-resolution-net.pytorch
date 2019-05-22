@@ -46,71 +46,123 @@ import numpy as np
 #         ],
 
 
-def read_bboxes(jspath, imgpath, expand=1.5):
+def read_bboxes(jspath, input_path, expand=2.0):
     '''
     :param jspath:
-    :param imgpath:
+    :param input_path:
+    :param expand:
     :return:
     '''
     with open(jspath, 'r') as f:
         json_data = json.load(f)
-    # print(json_data, type(json_data))
 
     image_size = json_data['image_size']
     results_dict = json_data['results']
     bboxes = list()
+    img_fnames = list()
+    lefttop_points = list()
 
     for img_fname in results_dict.keys():
-        img = mmcv.imread('{}/{}'.format(imgpath, img_fname))
+        img = mmcv.imread('{}/{}'.format(input_path, img_fname))
         for r in results_dict[img_fname]:
-            lt, rb = r['bbox']['lt'], r['bbox']['rb'] # left top, right bottom corners
-            lt = [int(dim*(1-expand/100)) for dim in lt]
+            lt, rb = r['bbox']['lt'], r['bbox']['rb']  # left top, right bottom corners
+            lt = [int(dim*(1-expand/100)) for dim in lt]  # apply expansion
             rb = [int(dim*(1+expand/100)) for dim in rb]
-            bbox = img[lt[1]:rb[1], lt[0]:rb[0]]  # TODO: this could crash! add image border, with size of <expand>
-            bboxes.append(bbox)
-            # mmcv.imshow(bbox)
 
-    return dict(image_size=image_size, bboxes=bboxes)
+            bbox = img[lt[1]:rb[1], lt[0]:rb[0]]  # crop
+            bboxes.append(bbox)
+            img_fnames.append(img_fname)
+            lefttop_points.append(lt)
+            # mmcv.imshow(bbox)  # debug
+
+    return dict(img_fnames=img_fnames, image_size=image_size, bboxes=bboxes, lefttop_points=lefttop_points)
 
 
 def calc_avg_aspect_ratio(bboxes):
-    avg_width = sum(bbox.shape[1] for bbox in bboxes) / len(bboxes)
-    avg_height = sum(bbox.shape[0] for bbox in bboxes) / len(bboxes)
-    return avg_height / avg_width
+    '''
+    :param bboxes:
+    :return: the averaged height/width ratio
+    '''
+    return sum(bbox.shape[0] for bbox in bboxes) / sum(bbox.shape[1] for bbox in bboxes)
+
+
+def plot_result(img, coords_list, scores):
+    '''
+    :param img:
+    :param coords_list:
+    :param scores:
+    :return:
+    '''
+    for idx, coords in enumerate(coords_list):
+        # Debug visualization
+        cv2.circle(img, coords, 4, (0, 255, 0), -1)
+        cv2.putText(img, str(idx)+': '+str(scores[0][idx][0])[:5], (coords[0]+5, coords[1]),
+                    cv2.FONT_HERSHEY_PLAIN, 0.8, (0, 255, 255), 1, cv2.LINE_AA)
+
+    cv2.namedWindow('image', cv2.WINDOW_NORMAL)
+    cv2.imshow('image', img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
+def save_final_results(outputs, bboxes_data, input_path):
+    '''
+    :param outputs:
+    :param bboxes_data:
+    :param input_path:
+    :return:
+    '''
+    for idx, output in enumerate(list(outputs)):
+        if isinstance(output, tuple):
+            heatmaps, _ = output
+        else:
+            heatmaps, _ = output, None
+
+        heatmaps = heatmaps.clone().cpu().numpy()
+        heatmap_shape = (heatmaps.shape[2], heatmaps.shape[3])
+
+        keypoints, scores = inference.get_max_preds(heatmaps)
+
+        bboxes = bboxes_data['bboxes']
+        bbox_img = mmcv.imread(bboxes[idx])
+        bbox_shape = bbox_img.shape[:2]
+
+        img_fname = bboxes_data['img_fnames'][idx]
+        full_img = mmcv.imread('{}/{}'.format(input_path, img_fname))
+        full_img_shape = full_img.shape[:2]
+
+        lefttop_point = bboxes_data['lefttop_points'][idx]
+
+        coords_list = list()
+        for idx, kp in enumerate(keypoints[0]):
+            bbox_coords = (int(kp[0] * bbox_shape[0]/heatmap_shape[0]), int(kp[1] * bbox_shape[1]/heatmap_shape[1]))
+            full_img_coords = (bbox_coords[0] + lefttop_point[0], bbox_coords[1] + lefttop_point[1])
+            coords_list.append(full_img_coords)
+
+        plot_result(full_img, coords_list, scores)  # debug
 
 
 def main():
     # Params
     config_file = '../experiments/coco/hrnet/w48_384x288_adam_lr1e-3.yaml'
+    cfg_mmcv = mmcv.Config.fromfile('../lib/config/mmcv_config.py')
     checkpoint = '../lib/models/pytorch/pose_coco/pose_hrnet_w48_384x288.pth'
     input_path = './input/images'
     json_path = './input/json/20190521073448_detection_bboxes.json'
 
     # Simplifying bullshit arg parsing (not touching get_pose_net() method)
     args = argparse.ArgumentParser().parse_args()
-    args.cfg, args.opts, args.modelDir, args.logDir, args.dataDir = config_file, [], None, None, None
+    args.cfg = config_file
+    args.opts, args.modelDir, args.logDir, args.dataDir = [], None, None, None
     update_config(cfg, args)
     ##
 
     bboxes_data = read_bboxes(json_path, input_path)
     bboxes = bboxes_data['bboxes']
 
-    image_size = bboxes_data['image_size']
-    full_img_width = image_size[1]
-    full_img_height = image_size[0]
-
-    # We will resize input image to match model_img_width, keeping aspect ratio
-    # model_img_width = cfg.MODEL.IMAGE_SIZE[1]
-    # input_img_width = input_img.shape[1]
-    # input_img_height = input_img.shape[0]
-    # wh_ratio = input_img_width / input_img_height
-    # model_size = (model_img_width, int(model_img_width / wh_ratio))
-
     model_input_width = cfg.MODEL.IMAGE_SIZE[1]
     height_scale = calc_avg_aspect_ratio(bboxes)
-    cfg_mmcv = mmcv.Config.fromfile('../lib/config/mmcv_config.py')
     cfg_mmcv.data.test.img_scale = (model_input_width, int(height_scale*model_input_width))
-    print(cfg_mmcv.data.test.img_scale)
 
     model = models.pose_hrnet.get_pose_net(cfg, is_train=False)
     model.load_state_dict(torch.load(checkpoint), strict=False)
@@ -122,38 +174,8 @@ def main():
     else:
         raise Exception('There are no bboxes!')
 
-    for idx, output in enumerate(list(outputs)):
-        if isinstance(output, tuple):
-            heatmaps, _ = output
-        else:
-            heatmaps, _ = output, None
+    save_final_results(outputs, bboxes_data, input_path)
 
-        input_img = mmcv.imread(bboxes[idx])
-        input_img_width = input_img.shape[1]
-        input_img_height = input_img.shape[0]
-
-        heatmaps = heatmaps.clone().cpu().numpy()
-        coords, scores = inference.get_max_preds(heatmaps)
-        print(scores)
-
-        # Transform back coords, matching input image
-        hm_width = heatmaps.shape[3]
-        hm_height = heatmaps.shape[2]
-
-        for idx, kp in enumerate(coords[0]):
-            tf_coords = (int(kp[0]*input_img_height/hm_height), int(kp[1]*input_img_width/hm_width))
-
-            # Debug visualization
-            print(idx, kp, tf_coords)
-            cv2.circle(input_img, tf_coords, 4, (0, 255, 0), -1)
-            cv2.putText(input_img, str(idx) + ': ' + str(scores[0][idx][0])[:5], (tf_coords[0]+5, tf_coords[1]),
-                        cv2.FONT_HERSHEY_PLAIN, 0.8, (0, 255, 255), 1, cv2.LINE_AA)
-
-        cv2.namedWindow('image', cv2.WINDOW_NORMAL)
-        cv2.imshow('image', input_img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-        ##
 
 
 if __name__ == '__main__':

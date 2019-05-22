@@ -5,8 +5,7 @@
 img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 # img_norm_cfg = dict(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], to_rgb=True)
 
-# img_scale = (384, 288)
-img_scale = (1333, 800)
+img_scale = (384, 288)  # overwritten at execution
 
 data = dict(
     imgs_per_gpu=2,

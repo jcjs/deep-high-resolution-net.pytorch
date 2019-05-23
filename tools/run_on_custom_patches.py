@@ -34,6 +34,7 @@ import mmcv
 from mmdet.apis import inference_detector
 # from mmdet.datasets import to_tensor
 
+import time
 import json
 import glob
 import numpy as np
@@ -86,16 +87,17 @@ def calc_avg_aspect_ratio(bboxes):
     return sum(bbox.shape[0] for bbox in bboxes) / sum(bbox.shape[1] for bbox in bboxes)
 
 
-def plot_result(img, img_fname, coords_list, scores):
+def plot_result(img, img_fname, coords_list, scores, output_path):
     '''
     :param img:
     :param coords_list:
     :param scores:
     :return:
     '''
-    new_path = '{}_poses.jpg'.format(img_fname)
 
-    if  os.path.exists(new_path):
+    new_path = '{}/{}_poses.jpg'.format(output_path, os.path.splitext(os.path.basename(img_fname))[0])
+
+    if  os.path.exists(new_path):  # accumulate
         img = mmcv.imread(new_path)
 
     for idx, coords in enumerate(coords_list):
@@ -132,7 +134,7 @@ def plot_result(img, img_fname, coords_list, scores):
     # cv2.destroyAllWindows()
 
 
-def save_final_results(outputs, bboxes_data, input_path):
+def save_final_results(outputs, bboxes_data, input_path, output_path):
     '''
     :param outputs:
     :param bboxes_data:
@@ -155,7 +157,6 @@ def save_final_results(outputs, bboxes_data, input_path):
         bbox_shape = bbox_img.shape[:2]
 
         img_fname = '{}/{}'.format(input_path, bboxes_data['img_fnames'][idx])
-        print(img_fname)
         full_img = mmcv.imread(img_fname)
         full_img_shape = full_img.shape[:2]
 
@@ -167,22 +168,35 @@ def save_final_results(outputs, bboxes_data, input_path):
             full_img_coords = (bbox_coords[0] + lefttop_point[0], bbox_coords[1] + lefttop_point[1])
             coords_list.append(full_img_coords)
 
-        plot_result(full_img, img_fname, coords_list, scores)  # debug
+        plot_result(full_img, img_fname, coords_list, scores, output_path)  # debug
 
 
 def main():
+    '''
+    Usage example:  python3 run_on_custom_patches.py -i ./input/images -js ./input/json/20190521073448_detection_bboxes.json -o ./pose_results
+    '''
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-i", "--input_path", help="Path to directory containing images OR path to a single image",
+                        required=True)
+    parser.add_argument("-js", "--input_json", help="Path to JSON containing detections",
+                        required=True)
+    parser.add_argument("-o", "--output_path", help="Desired output dir",
+                        required=True)
+    args = parser.parse_args()
+
     # Params
     config_file = '../experiments/coco/hrnet/w48_384x288_adam_lr1e-3.yaml'
     cfg_mmcv = mmcv.Config.fromfile('../lib/config/mmcv_config.py')
     checkpoint = '../lib/models/pytorch/pose_coco/pose_hrnet_w48_384x288.pth'
-    input_path = './input/FV_frames_1'
-    json_path = './input/json/20190523100427_detection_bboxes.json'
 
-    # Simplifying bullshit arg parsing (not touching get_pose_net() method)
-    args = argparse.ArgumentParser().parse_args()
-    args.cfg = config_file
-    args.opts, args.modelDir, args.logDir, args.dataDir = [], None, None, None
-    update_config(cfg, args)
+    input_path = args.input_path
+    json_path = args.input_json
+    output_path = args.output_path
+
+    # Trying to simplify bullshit cfg parsing without modifying get_pose_net() method
+    cfg.cfg = config_file
+    cfg.opts, cfg.modelDir, cfg.logDir, cfg.dataDir = [], '', '', ''
+    update_config(cfg, cfg)  # lol
     ##
 
     bboxes_data = read_bboxes(json_path, input_path)
@@ -202,10 +216,9 @@ def main():
     else:
         raise Exception('There are no bboxes!')
 
-    save_final_results(outputs, bboxes_data, input_path)
+    save_final_results(outputs, bboxes_data, input_path, output_path)
 
 
 
 if __name__ == '__main__':
     main()
-    # read_bboxes('./input/json/20190521073448_detection_bboxes.json', './input/images')

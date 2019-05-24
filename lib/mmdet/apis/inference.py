@@ -37,6 +37,7 @@ def _inference_single(model, img, img_transform, cfg, device):
     img = mmcv.imread(img)
     data = _prepare_data(img, img_transform, cfg, device)
     img = data['img'][0]
+
     with torch.no_grad():
         result = model(img)
         # result = model(return_loss=False, rescale=True, **data)

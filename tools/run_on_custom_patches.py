@@ -87,7 +87,7 @@ def calc_avg_aspect_ratio(bboxes):
     return sum(bbox.shape[0] for bbox in bboxes) / sum(bbox.shape[1] for bbox in bboxes)
 
 
-def plot_result(img, img_fname, coords_list, scores, output_path):
+def save_data(img, img_fname, coords_list, scores, output_path):
     '''
     :param img:
     :param coords_list:
@@ -97,7 +97,7 @@ def plot_result(img, img_fname, coords_list, scores, output_path):
 
     new_path = '{}/{}_poses.jpg'.format(output_path, os.path.splitext(os.path.basename(img_fname))[0])
 
-    if  os.path.exists(new_path):  # accumulate
+    if  os.path.exists(new_path):  # accumulate instances
         img = mmcv.imread(new_path)
 
     for idx, coords in enumerate(coords_list):
@@ -134,13 +134,15 @@ def plot_result(img, img_fname, coords_list, scores, output_path):
     # cv2.destroyAllWindows()
 
 
-def save_final_results(outputs, bboxes_data, input_path, output_path):
+def forward_and_parse(outputs, bboxes_data, input_path, output_path, save_images):
     '''
     :param outputs:
     :param bboxes_data:
     :param input_path:
     :return:
     '''
+    prev_fname = None
+    result_dict = dict()
     for idx, output in enumerate(list(outputs)):
         if isinstance(output, tuple):
             heatmaps, _ = output
@@ -156,19 +158,30 @@ def save_final_results(outputs, bboxes_data, input_path, output_path):
         bbox_img = mmcv.imread(bboxes[idx])
         bbox_shape = bbox_img.shape[:2]
 
-        img_fname = '{}/{}'.format(input_path, bboxes_data['img_fnames'][idx])
+        basefname = bboxes_data['img_fnames'][idx]
+        img_fname = '{}/{}'.format(input_path, basefname)
         full_img = mmcv.imread(img_fname)
-        full_img_shape = full_img.shape[:2]
 
         lefttop_point = bboxes_data['lefttop_points'][idx]
-
         coords_list = list()
+
         for idx, kp in enumerate(keypoints[0]):
             bbox_coords = (int(kp[0] * bbox_shape[0]/heatmap_shape[0]), int(kp[1] * bbox_shape[1]/heatmap_shape[1]))
             full_img_coords = (bbox_coords[0] + lefttop_point[0], bbox_coords[1] + lefttop_point[1])
             coords_list.append(full_img_coords)
 
-        plot_result(full_img, img_fname, coords_list, scores, output_path)  # debug
+        if basefname not in list(result_dict):
+            result_dict[basefname] = dict(keypoints=coords_list, scores=[str(s[0])[:5] for s in scores[0]])
+        else:
+            result_dict[basefname]['keypoints'] += coords_list
+            result_dict[basefname]['scores'] += [str(s[0])[:5] for s in scores[0]]
+
+        if save_images:
+            save_data(full_img, img_fname, coords_list, scores, output_path)  # debug
+
+    # Save JSON file
+    with open('{}_keypoints.json'.format(time.strftime("%Y%m%d%H%M%S")), 'w') as out_file:
+        json.dump(result_dict, out_file)
 
 
 def main():
@@ -182,6 +195,8 @@ def main():
                         required=True)
     parser.add_argument("-o", "--output_path", help="Desired output dir",
                         required=True)
+    parser.add_argument("-s", "--save_images", help="True/False",
+                        default=False, required=False)
     args = parser.parse_args()
 
     # Params
@@ -192,6 +207,7 @@ def main():
     input_path = args.input_path
     json_path = args.input_json
     output_path = args.output_path
+    save_images = eval(args.save_images)
 
     # Trying to simplify bullshit cfg parsing without modifying get_pose_net() method
     cfg.cfg = config_file
@@ -216,7 +232,7 @@ def main():
     else:
         raise Exception('There are no bboxes!')
 
-    save_final_results(outputs, bboxes_data, input_path, output_path)
+    forward_and_parse(outputs, bboxes_data, input_path, output_path, save_images)
 
 
 

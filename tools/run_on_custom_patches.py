@@ -47,7 +47,7 @@ import numpy as np
 #         ],
 
 
-def read_bboxes(jspath, input_path, expand=2.0):
+def read_bboxes(jspath, input_path, expand=1.0):
     '''
     :param jspath:
     :param input_path:
@@ -61,22 +61,23 @@ def read_bboxes(jspath, input_path, expand=2.0):
     results_dict = json_data['results']
     bboxes = list()
     img_fnames = list()
-    lefttop_points = list()
+    final_bbox_coords = list()
 
     for img_fname in results_dict.keys():
         img = mmcv.imread('{}/{}'.format(input_path, img_fname))
         for r in results_dict[img_fname]:
             lt, rb = r['bbox']['lt'], r['bbox']['rb']  # left top, right bottom corners
+            final_bbox_coords.append((lt, rb))
+
             lt = [int(dim*(1-expand/100)) for dim in lt]  # apply expansion
             rb = [int(dim*(1+expand/100)) for dim in rb]
 
             bbox = img[lt[1]:rb[1], lt[0]:rb[0]]  # crop
             bboxes.append(bbox)
             img_fnames.append(img_fname)
-            lefttop_points.append(lt)
             # mmcv.imshow(bbox)  # debug
 
-    return dict(img_fnames=img_fnames, image_size=image_size, bboxes=bboxes, lefttop_points=lefttop_points)
+    return dict(img_fnames=img_fnames, image_size=image_size, bboxes=bboxes, final_bbox_coords=final_bbox_coords)
 
 
 def calc_avg_aspect_ratio(bboxes):
@@ -87,7 +88,7 @@ def calc_avg_aspect_ratio(bboxes):
     return sum(bbox.shape[0] for bbox in bboxes) / sum(bbox.shape[1] for bbox in bboxes)
 
 
-def save_data(img, img_fname, coords_list, scores, output_path):
+def save_data(img, img_fname, coords_list, scores, final_bbox_coords, output_path):
     '''
     :param img:
     :param coords_list:
@@ -100,15 +101,38 @@ def save_data(img, img_fname, coords_list, scores, output_path):
     if  os.path.exists(new_path):  # accumulate instances
         img = mmcv.imread(new_path)
 
-    for idx, coords in enumerate(coords_list):
-        if idx in [1, 2, 3, 4]: continue
+    # for idx, coords in enumerate(coords_list):
+    #     if idx in [1, 2, 3, 4]: continue
+    #
+    #     cv2.circle(img, coords, 4, (0, 255, 255), -1)
+    #     cv2.putText(img, str(idx)+': '+str(scores[0][idx][0])[:3], (coords[0]+5, coords[1]),
+    #                 cv2.FONT_HERSHEY_PLAIN, 0.8, (0, 255, 0), 1, cv2.LINE_AA)
 
-        cv2.circle(img, coords, 4, (0, 255, 255), -1)
-        cv2.putText(img, str(idx)+': '+str(scores[0][idx][0])[:3], (coords[0]+5, coords[1]),
-                    cv2.FONT_HERSHEY_PLAIN, 0.8, (0, 255, 0), 1, cv2.LINE_AA)
+    # print((final_bbox_coords[0][0], final_bbox_coords[1][1]), tuple(final_bbox_coords[1]))
 
-    line_color = (255, 255, 0)
-    line_thickness = 2
+
+    bbox_rightbottom = final_bbox_coords[1]
+
+    left_ankle = coords_list[15]
+    left_ankle_to_bbox = abs(left_ankle[1]-bbox_rightbottom[1])
+    right_ankle = coords_list[16]
+    right_ankle_to_bbox = abs(right_ankle[1]-bbox_rightbottom[1])
+
+    # closest_foot = left_ankle if left_ankle_to_bbox < right_ankle_to_bbox else right_ankle
+    closest_dist = min(left_ankle_to_bbox, right_ankle_to_bbox)
+
+    valeo_left_foot = (left_ankle[0], left_ankle[1]+closest_dist)
+    valeo_right_foot = (right_ankle[0], right_ankle[1]+closest_dist)
+    valeo_middle_point = (int((coords_list[11][0]+coords_list[12][0])/2), int((coords_list[11][1]+coords_list[12][1])/2))
+    valeo_top_point = (int((coords_list[3][0]+coords_list[4][0])/2), int((coords_list[3][1]+coords_list[4][1])/2))
+
+    cv2.line(img, valeo_left_foot, valeo_right_foot, (0, 0, 255), 2, 1)
+    cv2.line(img, valeo_right_foot, valeo_middle_point, (0, 0, 255), 2, 1)
+    cv2.line(img, valeo_middle_point, valeo_top_point, (0, 0, 255), 2, 1)
+
+
+    # line_color = (255, 255, 0)
+    # line_thickness = 2
     # cv2.line(img, coords_list[0], coords_list[5], line_color, line_thickness)
     # cv2.line(img, coords_list[0], coords_list[6], line_color, line_thickness)
 
@@ -152,9 +176,10 @@ def forward_and_parse(outputs, bboxes_data, input_path, output_path, save_images
         heatmaps = heatmaps.clone().cpu().numpy()
         heatmap_shape = (heatmaps.shape[2], heatmaps.shape[3])
 
-        keypoints, scores = inference.get_max_preds(heatmaps)
+        keypoints, scores = inference.get_max_preds(heatmaps) 
 
         bboxes = bboxes_data['bboxes']
+        final_bbox_coords = bboxes_data['final_bbox_coords']
         bbox_img = mmcv.imread(bboxes[idx])
         bbox_shape = bbox_img.shape[:2]
 
@@ -162,10 +187,10 @@ def forward_and_parse(outputs, bboxes_data, input_path, output_path, save_images
         img_fname = '{}/{}'.format(input_path, basefname)
         full_img = mmcv.imread(img_fname)
 
-        lefttop_point = bboxes_data['lefttop_points'][idx]
+        lefttop_point = bboxes_data['final_bbox_coords'][idx][0]
         coords_list = list()
 
-        for idx, kp in enumerate(keypoints[0]):
+        for _, kp in enumerate(keypoints[0]):
             bbox_coords = (int(kp[0] * bbox_shape[0]/heatmap_shape[0]), int(kp[1] * bbox_shape[1]/heatmap_shape[1]))
             full_img_coords = (bbox_coords[0] + lefttop_point[0], bbox_coords[1] + lefttop_point[1])
             coords_list.append(full_img_coords)
@@ -177,7 +202,8 @@ def forward_and_parse(outputs, bboxes_data, input_path, output_path, save_images
             result_dict[basefname]['scores'] += [str(s[0])[:5] for s in scores[0]]
 
         if save_images:
-            save_data(full_img, img_fname, coords_list, scores, output_path)  # debug
+            # print(final_bbox_coords[idx], idx)
+            save_data(full_img, img_fname, coords_list, scores, final_bbox_coords[idx], output_path)  # debug
 
     # Save JSON file
     with open('{}_keypoints.json'.format(time.strftime("%Y%m%d%H%M%S")), 'w') as out_file:

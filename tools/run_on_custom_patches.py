@@ -36,6 +36,7 @@ from mmdet.apis import inference_detector
 
 import time
 import json
+import math
 import glob
 import numpy as np
 
@@ -88,7 +89,20 @@ def calc_avg_aspect_ratio(bboxes):
     return sum(bbox.shape[0] for bbox in bboxes) / sum(bbox.shape[1] for bbox in bboxes)
 
 
-def save_data(img, img_fname, coords_list, scores, final_bbox_coords, output_path):
+def calc_angle(p1, p2):
+    if (p2[0]-p1[0]) == 0:
+        return math.pi/2
+    else:
+        return math.atan((p2[1]-p1[1])/(p2[0]-p1[0]))
+
+
+def project_point_along_line(init_point, theta, distance):
+    new_x = init_point[0] + distance * math.cos(theta)
+    new_y = init_point[1] - distance * math.sin(theta)
+    return int(new_x), int(new_y)
+
+
+def draw_final_points(img, img_fname, coords_list, scores, final_bbox_coords, output_path):
     '''
     :param img:
     :param coords_list:
@@ -126,9 +140,15 @@ def save_data(img, img_fname, coords_list, scores, final_bbox_coords, output_pat
     valeo_middle_point = (int((coords_list[11][0]+coords_list[12][0])/2), int((coords_list[11][1]+coords_list[12][1])/2))
     valeo_top_point = (int((coords_list[3][0]+coords_list[4][0])/2), int((coords_list[3][1]+coords_list[4][1])/2))
 
+    print(valeo_middle_point, valeo_top_point)
+
+    theta = calc_angle(valeo_middle_point, valeo_top_point)
+    new_top_point = project_point_along_line(valeo_top_point, theta, 10.0)
+
+
     cv2.line(img, valeo_left_foot, valeo_right_foot, (0, 0, 255), 2, 1)
     cv2.line(img, valeo_right_foot, valeo_middle_point, (0, 0, 255), 2, 1)
-    cv2.line(img, valeo_middle_point, valeo_top_point, (0, 0, 255), 2, 1)
+    cv2.line(img, valeo_middle_point, new_top_point, (0, 0, 255), 2, 1)
 
 
     # line_color = (255, 255, 0)
@@ -203,7 +223,7 @@ def forward_and_parse(outputs, bboxes_data, input_path, output_path, save_images
 
         if save_images:
             # print(final_bbox_coords[idx], idx)
-            save_data(full_img, img_fname, coords_list, scores, final_bbox_coords[idx], output_path)  # debug
+            draw_final_points(full_img, img_fname, coords_list, scores, final_bbox_coords[idx], output_path)  # debug
 
     # Save JSON file
     with open('{}_keypoints.json'.format(time.strftime("%Y%m%d%H%M%S")), 'w') as out_file:

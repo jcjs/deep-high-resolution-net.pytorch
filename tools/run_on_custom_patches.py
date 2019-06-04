@@ -104,7 +104,7 @@ def calc_angle(p1, p2):
     :return:
     '''
     if (p2[0]-p1[0]) == 0:
-        return math.pi/2
+        return math.pi/2  # atan limit
     else:
         return math.atan((p2[1]-p1[1])/(p2[0]-p1[0]))
 
@@ -135,7 +135,7 @@ def get_valeo_pd_ann(coords_list, final_bbox_coords):
     right_ankle = coords_list[16]
     right_ankle_to_bbox = abs(right_ankle[1] - bbox_rightbottom[1])
     ears_middle_point = (int((coords_list[3][0] + coords_list[4][0]) / 2),
-                   int((coords_list[3][1] + coords_list[4][1]) / 2))
+                         int((coords_list[3][1] + coords_list[4][1]) / 2))
 
     closest_dist = min(left_ankle_to_bbox, right_ankle_to_bbox)
 
@@ -153,6 +153,13 @@ def get_valeo_pd_ann(coords_list, final_bbox_coords):
 
     return dict(left_foot=valeo_left_foot, right_foot=valeo_right_foot,
                 middle_point=valeo_middle_point, top_point=head_top)
+
+
+def get_valeo_scores(scores):
+    scores = scores[0]
+    return [str(scores[15][0])[:5], str(scores[16][0])[:5],
+            str(0.5*(scores[11][0]+scores[12][0]))[:5],
+            str(0.5*(scores[3][0]+scores[4][0]))[:5]]
 
 
 def draw_valeo_keypoints(img, img_fname, valeo_ann, args):  ## debug
@@ -270,10 +277,9 @@ def forward_and_parse(outputs, bboxes_data, args):
             coords_list.append(full_img_coords)
 
         if args.valeo:
-            scores = None
             valeo_ann = get_valeo_pd_ann(coords_list, final_bbox_coords[idx])
             coords_list = list(valeo_ann.values())
-            sc = ['0.0' for s in range(len(coords_list))]
+            sc = get_valeo_scores(scores)
         else:
             sc = [str(s[0])[:5] for s in scores[0]]
 

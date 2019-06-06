@@ -97,33 +97,37 @@ def calc_avg_aspect_ratio(bboxes):
     return sum(bbox.shape[0] for bbox in bboxes) / sum(bbox.shape[1] for bbox in bboxes)
 
 
-def calc_angle(p1, p2):
+def project_point_along_direction(ref_point, point_2, p_value):
     '''
     :param p1:
     :param p2:
     :return:
     '''
-    if (p2[0]-p1[0]) == 0:
-        return math.pi/2  # atan limit
+    r_x, r_y = ref_point[0], ref_point[1]
+    p_x, p_y = point_2[0], point_2[1]
+
+    d_i = p_x - r_x
+    d_j = p_y - r_y
+
+    if (r_x == p_x):
+        theta = math.pi / 2  # atan limit
     else:
-        return math.atan((p2[1]-p1[1])/(p2[0]-p1[0]))
+        theta = math.atan(d_j / d_i)
 
+    segment_magnitude = math.sqrt((r_x - p_x)**2 + (r_y - p_y)**2)
 
-def project_point_along_line(init_point, theta, magnitude, p_value):
-    '''
-    :param init_point:
-    :param theta:
-    :param distance:
-    :return:
-    '''
-    new_x = init_point[0] + p_value*magnitude * math.cos(theta)
-    new_y = init_point[1] - p_value*magnitude * abs(math.sin(theta))
+    # Y axis is inverted in images, moving in the ref_point -> point_2 direction
+    # requires subtraction of values in upper-left and lower-left quadrants
+    inv = -1 if d_i < 0 else 1
+
+    new_x = p_x + inv * p_value * segment_magnitude * math.cos(theta)
+    new_y = p_y + inv * p_value * segment_magnitude * math.sin(theta)
+
     return int(new_x), int(new_y)
 
 
 def get_valeo_pd_ann(coords_list, final_bbox_coords):
     '''
-
     :param coords_list:
     :param final_bbox_coords:
     :return:
@@ -134,32 +138,35 @@ def get_valeo_pd_ann(coords_list, final_bbox_coords):
     left_ankle_to_bbox = abs(left_ankle[1] - bbox_rightbottom[1])
     right_ankle = coords_list[16]
     right_ankle_to_bbox = abs(right_ankle[1] - bbox_rightbottom[1])
-    ears_middle_point = (int((coords_list[3][0] + coords_list[4][0]) / 2),
-                         int((coords_list[3][1] + coords_list[4][1]) / 2))
 
     closest_dist = min(left_ankle_to_bbox, right_ankle_to_bbox)
+    ears_middle_point = (int((coords_list[3][0] + coords_list[4][0]) / 2),
+                         int((coords_list[3][1] + coords_list[4][1]) / 2))
 
     valeo_left_foot = (left_ankle[0], left_ankle[1] + closest_dist)
     valeo_right_foot = (right_ankle[0], right_ankle[1] + closest_dist)
     valeo_middle_point = (int((coords_list[11][0] + coords_list[12][0]) / 2),
                           int((coords_list[11][1] + coords_list[12][1]) / 2))
 
-    # the following is used to extend ears point height to the top of the head
-    theta = calc_angle(ears_middle_point, valeo_middle_point)
-    torso_magnitude = math.sqrt((ears_middle_point[0]-valeo_middle_point[0])**2 +
-                                (ears_middle_point[1]-valeo_middle_point[1])**2)
-    p_value = 0.118
-    head_top = project_point_along_line(ears_middle_point, theta, torso_magnitude, p_value)
+    # What follows is used to extend ears point height to the top of the head
+    valeo_head_top = project_point_along_direction(valeo_middle_point, ears_middle_point, p_value=0.118)
 
     return dict(left_foot=valeo_left_foot, right_foot=valeo_right_foot,
-                middle_point=valeo_middle_point, top_point=head_top)
+                middle_point=valeo_middle_point, top_point=valeo_head_top, top_original=ears_middle_point)
 
 
 def get_valeo_scores(scores):
+    '''
+    Simplistic score approximations
+
+    :param scores:
+    :return:
+    '''
     scores = scores[0]
-    return [str(scores[15][0])[:5], str(scores[16][0])[:5],
-            str(0.5*(scores[11][0]+scores[12][0]))[:5],
-            str(0.5*(scores[3][0]+scores[4][0]))[:5]]
+    return [str(scores[15][0])[:5],                      # left_ankle
+            str(scores[16][0])[:5],                      # right_ankle
+            str(0.5*(scores[11][0]+scores[12][0]))[:5],  # hip average
+            str(0.5*(scores[3][0]+scores[4][0]))[:5]]    # ears average
 
 
 def draw_valeo_keypoints(img, img_fname, valeo_ann, args):  ## debug
@@ -179,6 +186,8 @@ def draw_valeo_keypoints(img, img_fname, valeo_ann, args):  ## debug
     cv2.circle(img, valeo_ann[1], 4, (0, 0, 255), -1)
     cv2.circle(img, valeo_ann[2], 4, (0, 0, 255), -1)
     cv2.circle(img, valeo_ann[3], 4, (0, 0, 255), -1)
+    cv2.circle(img, valeo_ann[4], 4, (0, 255, 0), -1)
+
 
     cv2.line(img, valeo_ann[0], valeo_ann[1], (0, 0, 255), 2, 1)
     cv2.line(img, valeo_ann[1], valeo_ann[2], (0, 0, 255), 2, 1)
@@ -324,7 +333,7 @@ def main():
     # Trying to simplify bullshit cfg parsing without modifying get_pose_net() method
     cfg.cfg = config_file
     cfg.opts, cfg.modelDir, cfg.logDir, cfg.dataDir = [], '', '', ''
-    update_config(cfg, cfg)  # lol
+    update_config(cfg, cfg)
     ##
 
     bboxes_data = read_bboxes(args.input_json, args.input_path)

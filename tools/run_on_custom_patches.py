@@ -97,10 +97,13 @@ def calc_avg_aspect_ratio(bboxes):
     return sum(bbox.shape[0] for bbox in bboxes) / sum(bbox.shape[1] for bbox in bboxes)
 
 
-def project_point_along_direction(ref_point, point_2, p_value):
+def project_point_along_direction(ref_point, point_2, p_value=0.0, x_cut=0.0, y_cut=0.0):
     '''
-    :param p1:
-    :param p2:
+    :param ref_point:
+    :param point_2:
+    :param p_value:
+    :param x_cut:
+    :param y_cut:
     :return:
     '''
     r_x, r_y = ref_point[0], ref_point[1]
@@ -110,18 +113,34 @@ def project_point_along_direction(ref_point, point_2, p_value):
     d_j = p_y - r_y
 
     if (r_x == p_x):
-        theta = math.pi / 2  # atan limit
+        theta = math.pi / 2  # arctan limit x->inf
     else:
-        theta = math.atan(d_j / d_i)
+        theta = abs(math.atan(d_j / d_i))
 
-    segment_magnitude = math.sqrt((r_x - p_x)**2 + (r_y - p_y)**2)
+    sign_x = -1 if d_i < 0 else 1
+    sign_y = -1 if d_j < 0 else 1
 
-    # Y axis is inverted in images, moving in the ref_point -> point_2 direction
-    # requires subtraction of values in upper-left and lower-left quadrants
-    inv = -1 if d_i < 0 else 1
-
-    new_x = p_x + inv * p_value * segment_magnitude * math.cos(theta)
-    new_y = p_y + inv * p_value * segment_magnitude * math.sin(theta)
+    if x_cut:
+        new_x = x_cut
+        if theta == math.pi/2:  # singularity, do nothing
+            return int(p_x), int(p_y)
+        else:
+            new_magnitude = (new_x - r_x) / (sign_x * math.cos(theta))
+            new_y = r_y + sign_y * new_magnitude * math.sin(theta)
+    elif y_cut:
+        new_y = y_cut
+        if theta == 0:  # singularity, do nothing
+            return int(p_x), int(p_y)
+        else:
+            new_magnitude = (new_y - r_y) / (sign_y * math.sin(theta))
+            new_x = r_x + sign_x * new_magnitude * math.cos(theta)
+    elif p_value:
+        segment_magnitude = math.sqrt((r_x - p_x) ** 2 + (r_y - p_y) ** 2)
+        new_magnitude = segment_magnitude * (1 + p_value)
+        new_x = r_x + sign_x * new_magnitude * math.cos(theta)
+        new_y = r_y + sign_y * new_magnitude * math.sin(theta)
+    else:
+        return int(p_x), int(p_y)
 
     return int(new_x), int(new_y)
 
@@ -132,6 +151,7 @@ def get_valeo_pd_ann(coords_list, final_bbox_coords):
     :param final_bbox_coords:
     :return:
     '''
+    bbox_topleft = final_bbox_coords[0]
     bbox_rightbottom = final_bbox_coords[1]
 
     left_ankle = coords_list[15]
@@ -143,13 +163,15 @@ def get_valeo_pd_ann(coords_list, final_bbox_coords):
     ears_middle_point = (int((coords_list[3][0] + coords_list[4][0]) / 2),
                          int((coords_list[3][1] + coords_list[4][1]) / 2))
 
-    valeo_left_foot = (left_ankle[0], left_ankle[1] + closest_dist)
-    valeo_right_foot = (right_ankle[0], right_ankle[1] + closest_dist)
     valeo_middle_point = (int((coords_list[11][0] + coords_list[12][0]) / 2),
                           int((coords_list[11][1] + coords_list[12][1]) / 2))
 
-    # What follows is used to extend ears point height to the top of the head
-    valeo_head_top = project_point_along_direction(valeo_middle_point, ears_middle_point, p_value=0.118)
+    # valeo_left_foot = (left_ankle[0], left_ankle[1] + closest_dist)
+    # valeo_right_foot = (right_ankle[0], right_ankle[1] + closest_dist)
+
+    valeo_left_foot = project_point_along_direction(valeo_middle_point, left_ankle, y_cut=bbox_rightbottom[1])
+    valeo_right_foot = project_point_along_direction(valeo_middle_point, right_ankle, y_cut=bbox_rightbottom[1])
+    valeo_head_top = project_point_along_direction(valeo_middle_point, ears_middle_point, y_cut=bbox_topleft[1])
 
     return dict(left_foot=valeo_left_foot, right_foot=valeo_right_foot,
                 middle_point=valeo_middle_point, top_point=valeo_head_top, top_original=ears_middle_point)

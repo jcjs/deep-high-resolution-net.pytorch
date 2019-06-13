@@ -41,6 +41,8 @@ import math
 # import numpy as np
 # from PIL import Image
 
+import magic
+
 
 # "keypoints": [
 #             "nose","left_eye","right_eye","left_ear","right_ear",
@@ -65,14 +67,32 @@ def read_bboxes(jspath, input_path, expand=1.0):
         json_data = json.load(f)
 
     image_size = json_data['image_size']
-    results_dict = json_data['results']
+    detections_dict = json_data['results']
     bboxes = list()
     img_fnames = list()
     final_bbox_coords = list()
+    np_images_vid = list()
 
-    for img_fname in results_dict.keys():
-        img = mmcv.imread('{}/{}'.format(input_path, img_fname))
-        for r in results_dict[img_fname]:
+    if os.path.isfile(input_path):
+        mime = magic.from_file(input_path, mime=True)
+        if 'video' in mime:
+            # extract the video into frames
+            step = int(json_data['step'])
+            np_images_vid = mmcv.VideoReader(input_path)[::step]
+            # auto-generate file names: these files will never exist in disk
+            # img_fnames = ['{}.jpg'.format(n * step + 1) for n in range(len(np_images_vid))]
+        else:
+            raise Exception('Input file type not supported.')
+
+    for idx, img_fname in enumerate(detections_dict.keys()):
+        if os.path.isdir(input_path):
+            full_img = mmcv.imread('{}/{}'.format(input_path, img_fname))
+        elif np_images_vid:
+            full_img = np_images_vid[idx]
+        else:
+            raise Exception('No valid input provided')
+
+        for r in detections_dict[img_fname]:
             lt, rb = r['bbox']['lt'], r['bbox']['rb']  # left top, right bottom corners
 
             lt = [int(dim*(1-expand/100)) for dim in lt]  # apply expansion
@@ -80,7 +100,7 @@ def read_bboxes(jspath, input_path, expand=1.0):
 
             final_bbox_coords.append((lt, rb))
 
-            bbox = img[lt[1]:rb[1], lt[0]:rb[0]]  # crop
+            bbox = full_img[lt[1]:rb[1], lt[0]:rb[0]]  # crop
             bboxes.append(bbox)
             img_fnames.append(img_fname)
             # mmcv.imshow(bbox)  # debug
@@ -97,13 +117,14 @@ def calc_avg_aspect_ratio(bboxes):
     return sum(bbox.shape[0] for bbox in bboxes) / sum(bbox.shape[1] for bbox in bboxes)
 
 
-def project_point_along_direction(ref_point, point_2, p_value=0.0, x_cut=0.0, y_cut=0.0):
+def project_point_along_direction(ref_point, point_2, x_cut=0.0, y_cut=0.0, p_value=0.0):
     '''
+
     :param ref_point:
     :param point_2:
-    :param p_value:
     :param x_cut:
     :param y_cut:
+    :param p_value:
     :return:
     '''
     r_x, r_y = ref_point[0], ref_point[1]
@@ -120,27 +141,24 @@ def project_point_along_direction(ref_point, point_2, p_value=0.0, x_cut=0.0, y_
     sign_x = -1 if d_i < 0 else 1
     sign_y = -1 if d_j < 0 else 1
 
+    if theta == math.pi/2 or theta == 0:  # singularities, do nothing
+        return int(p_x), int(p_y)
+
     if x_cut:
         new_x = x_cut
-        if theta == math.pi/2:  # singularity, do nothing
-            return int(p_x), int(p_y)
-        else:
-            new_magnitude = (new_x - r_x) / (sign_x * math.cos(theta))
-            new_y = r_y + sign_y * new_magnitude * math.sin(theta)
+        new_magnitude = (new_x - r_x) / (sign_x * math.cos(theta))
+        new_y = r_y + sign_y * new_magnitude * math.sin(theta)
     elif y_cut:
         new_y = y_cut
-        if theta == 0:  # singularity, do nothing
-            return int(p_x), int(p_y)
-        else:
-            new_magnitude = (new_y - r_y) / (sign_y * math.sin(theta))
-            new_x = r_x + sign_x * new_magnitude * math.cos(theta)
+        new_magnitude = (new_y - r_y) / (sign_y * math.sin(theta))
+        new_x = r_x + sign_x * new_magnitude * math.cos(theta)
     elif p_value:
         segment_magnitude = math.sqrt((r_x - p_x) ** 2 + (r_y - p_y) ** 2)
         new_magnitude = segment_magnitude * (1 + p_value)
         new_x = r_x + sign_x * new_magnitude * math.cos(theta)
         new_y = r_y + sign_y * new_magnitude * math.sin(theta)
     else:
-        return int(p_x), int(p_y)
+        raise Exception('Either x_cut or y_cut or p_value must be provided')
 
     return int(new_x), int(new_y)
 
@@ -166,12 +184,15 @@ def get_valeo_pd_ann(coords_list, final_bbox_coords):
     valeo_middle_point = (int((coords_list[11][0] + coords_list[12][0]) / 2),
                           int((coords_list[11][1] + coords_list[12][1]) / 2))
 
-    # valeo_left_foot = (left_ankle[0], left_ankle[1] + closest_dist)
-    # valeo_right_foot = (right_ankle[0], right_ankle[1] + closest_dist)
-
-    valeo_left_foot = project_point_along_direction(valeo_middle_point, left_ankle, y_cut=bbox_rightbottom[1])
-    valeo_right_foot = project_point_along_direction(valeo_middle_point, right_ankle, y_cut=bbox_rightbottom[1])
     valeo_head_top = project_point_along_direction(valeo_middle_point, ears_middle_point, y_cut=bbox_topleft[1])
+
+
+    valeo_left_foot = (left_ankle[0], left_ankle[1] + closest_dist)
+    valeo_right_foot = (right_ankle[0], right_ankle[1] + closest_dist)
+
+    # Not good
+    # valeo_left_foot = project_point_along_direction(valeo_middle_point, left_ankle, y_cut=bbox_rightbottom[1])
+    # valeo_right_foot = project_point_along_direction(valeo_left_foot, right_ankle, x_cut=bbox_rightbottom[0])
 
     return dict(left_foot=valeo_left_foot, right_foot=valeo_right_foot,
                 middle_point=valeo_middle_point, top_point=valeo_head_top, top_original=ears_middle_point)
@@ -270,13 +291,30 @@ def draw_all_keypoints(img, img_fname, coords_list, scores, final_bbox_coords, a
     # cv2.destroyAllWindows()
 
 
-def forward_and_parse(outputs, bboxes_data, args):
+def process_heatmaps(outputs, bboxes_data, args):
     '''
     :param outputs:
     :param bboxes_data:
     :param input_path:
     :return:
     '''
+    with open(args.input_json, 'r') as f:
+        json_data = json.load(f)
+
+    np_images_vid = list()
+
+    # Handle video input
+    if os.path.isfile(args.input_path):
+        mime = magic.from_file(args.input_path, mime=True)
+        if 'video' in mime:
+            # extract the video into frames
+            step = int(json_data['step'])
+            np_images_vid = mmcv.VideoReader(args.input_path)[::step]
+            # auto-generate file names: these files will never exist in disk
+            # img_fnames = ['{}.jpg'.format(n * step + 1) for n in range(len(np_images_vid))]
+        else:
+            raise Exception('Input file type not supported.')
+        
 
     result_dict = dict()
     for idx, output in enumerate(list(outputs)):
@@ -297,7 +335,15 @@ def forward_and_parse(outputs, bboxes_data, args):
 
         basefname = bboxes_data['img_fnames'][idx]
         img_fname = '{}/{}'.format(args.input_path, basefname)
-        full_img = mmcv.imread(img_fname)
+
+        if os.path.isdir(args.input_path):
+            full_img = mmcv.imread(img_fname)
+        elif np_images_vid:
+            frame_idx = int(basefname.split('.')[0]) - 1
+            print(frame_idx)
+            full_img = np_images_vid[frame_idx]
+        else:
+            raise Exception('No valid input provided')
 
         lefttop_point = bboxes_data['final_bbox_coords'][idx][0]
         coords_list = list()
@@ -324,7 +370,6 @@ def forward_and_parse(outputs, bboxes_data, args):
             if args.valeo:
                 draw_valeo_keypoints(full_img, img_fname, coords_list, args)
             else:
-                # print(final_bbox_coords[idx], idx)
                 draw_all_keypoints(full_img, img_fname, coords_list, scores, final_bbox_coords[idx], args)
 
     # Save JSON file
@@ -375,7 +420,7 @@ def main():
     else:
         raise Exception('There are no bboxes!')
 
-    forward_and_parse(outputs, bboxes_data, args)
+    process_heatmaps(outputs, bboxes_data, args)
 
 
 

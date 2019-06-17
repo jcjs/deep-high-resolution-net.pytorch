@@ -8,7 +8,6 @@ from __future__ import print_function
 
 import argparse
 import os
-# import pprint
 
 import torch
 import torch.nn.parallel
@@ -71,24 +70,24 @@ def read_bboxes(jspath, input_path, expand=1.0):
     bboxes = list()
     img_fnames = list()
     final_bbox_coords = list()
-    np_images_vid = list()
+    vid_frames = list()
 
     if os.path.isfile(input_path):
         mime = magic.from_file(input_path, mime=True)
         if 'video' in mime:
             # extract the video into frames
-            step = int(json_data['step'])
-            np_images_vid = mmcv.VideoReader(input_path)[::step]
+            vid_frames = list(mmcv.VideoReader(input_path))
+
             # auto-generate file names: these files will never exist in disk
-            # img_fnames = ['{}.jpg'.format(n * step + 1) for n in range(len(np_images_vid))]
+            # img_fnames = ['{}.jpg'.format(n * step + 1) for n in range(len(vid_frames))]
         else:
             raise Exception('Input file type not supported.')
 
     for idx, img_fname in enumerate(detections_dict.keys()):
         if os.path.isdir(input_path):
             full_img = mmcv.imread('{}/{}'.format(input_path, img_fname))
-        elif np_images_vid:
-            full_img = np_images_vid[idx]
+        elif vid_frames:
+            full_img = vid_frames[idx]
         else:
             raise Exception('No valid input provided')
 
@@ -185,7 +184,6 @@ def get_valeo_pd_ann(coords_list, final_bbox_coords):
                           int((coords_list[11][1] + coords_list[12][1]) / 2))
 
     valeo_head_top = project_point_along_direction(valeo_middle_point, ears_middle_point, y_cut=bbox_topleft[1])
-
 
     valeo_left_foot = (left_ankle[0], left_ankle[1] + closest_dist)
     valeo_right_foot = (right_ankle[0], right_ankle[1] + closest_dist)
@@ -290,7 +288,6 @@ def draw_all_keypoints(img, img_fname, coords_list, scores, final_bbox_coords, a
     # cv2.waitKey(0)
     # cv2.destroyAllWindows()
 
-
 def process_heatmaps(outputs, bboxes_data, args):
     '''
     :param outputs:
@@ -298,25 +295,22 @@ def process_heatmaps(outputs, bboxes_data, args):
     :param input_path:
     :return:
     '''
-    with open(args.input_json, 'r') as f:
-        json_data = json.load(f)
 
-    np_images_vid = list()
+    vid_frames = list()
 
     # Handle video input
     if os.path.isfile(args.input_path):
         mime = magic.from_file(args.input_path, mime=True)
         if 'video' in mime:
             # extract the video into frames
-            step = int(json_data['step'])
-            np_images_vid = mmcv.VideoReader(args.input_path)[::step]
+            vid_frames = list(mmcv.VideoReader(args.input_path))
             # auto-generate file names: these files will never exist in disk
-            # img_fnames = ['{}.jpg'.format(n * step + 1) for n in range(len(np_images_vid))]
+            # img_fnames = ['{}.jpg'.format(n * step + 1) for n in range(len(vid_frames))]
         else:
             raise Exception('Input file type not supported.')
-        
 
     result_dict = dict()
+
     for idx, output in enumerate(list(outputs)):
         if isinstance(output, tuple):
             heatmaps, _ = output
@@ -326,7 +320,7 @@ def process_heatmaps(outputs, bboxes_data, args):
         heatmaps = heatmaps.clone().cpu().numpy()
         heatmap_shape = (heatmaps.shape[2], heatmaps.shape[3])
 
-        keypoints, scores = inference.get_max_preds(heatmaps) 
+        keypoints, scores = inference.get_max_preds(heatmaps)
 
         bboxes = bboxes_data['bboxes']
         final_bbox_coords = bboxes_data['final_bbox_coords']
@@ -338,10 +332,10 @@ def process_heatmaps(outputs, bboxes_data, args):
 
         if os.path.isdir(args.input_path):
             full_img = mmcv.imread(img_fname)
-        elif np_images_vid:
+        elif vid_frames:
             frame_idx = int(basefname.split('.')[0]) - 1
             print(frame_idx)
-            full_img = np_images_vid[frame_idx]
+            full_img = vid_frames[frame_idx]
         else:
             raise Exception('No valid input provided')
 
